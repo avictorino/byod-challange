@@ -169,7 +169,7 @@ class OllamaClient(LLMClient):
 
     provider = "ollama"
 
-    def __init__(self, model: str, base_url: str | None = None, timeout: int = 120):
+    def __init__(self, model: str, base_url: str | None = None, timeout: int = 240):
         super().__init__(model, timeout)
         self.base_url = (base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
         self._verify_model_available()
@@ -218,7 +218,7 @@ class OpenAIClient(LLMClient):
 
     provider = "openai"
 
-    def __init__(self, model: str, api_key: str | None = None, timeout: int = 120):
+    def __init__(self, model: str, api_key: str | None = None, timeout: int = 240):
         super().__init__(model, timeout)
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
