@@ -171,31 +171,14 @@ escalation needed, and a clean `PASS`:
 [16:06:14] DONE     run `cd generated-app && npm run dev` to try the app
 ```
 
-Note the real cost: **$0.0135** for a full run, since `gpt-5.6-terra`/
-`gpt-5.6-luna` are cheap per-token and this converged in a single repair
-round — much less than a rough per-token guess would suggest, because
-fewer retries (needing fewer calls) matters more than the per-token rate
-does.
-
-**For comparison**, the same spec against a much larger *local* model —
-a community 27B parameter, Q3-quantized build squeezed to just fit a
-16GB GPU (`SetneufPT/Qwen3.6-27B-MTP_Q3_32K_16GB-GPU`) — did not reach
-this clean a result. It ran to completion but finished with a few
-simple test failures still open, unlike the OpenAI run above. Bigger
-isn't automatically better locally: an aggressive Q3 quantization
-squeezed to just barely fit 16GB trades real per-weight quality for
-parameter count, and can end up behind either a well-quantized smaller
-model (`qwen2.5-coder:14b`, Q4_K_M) or a hosted model with no such
-VRAM ceiling at all.
-
-If `Review` still fails after every local retry and `OPENAI_API_KEY` is
-set, you'd see `ROUTE ... trying one escalation`, then a block of
-`ESCALATE openai:<model> -> <path>` lines instead of `REPAIR`, before the
-final `VALIDATE`/`REVIEW`/`FINALIZE`. In practice, a 14B local model
-doesn't always reach a full `PASS` within the default retry budget — that
-is a known, documented limitation, not a bug: `Finalize` always reports
-honestly either way (`SUCCESS` vs `FINISHED WITH OPEN ISSUES` plus exactly
-what's unresolved), and the process exit code reflects it.
+Real cost: **$0.0135**, cheap mainly because it converged in one repair
+round — fewer retries beats a lower per-token rate. For comparison, a
+much larger *local* model (27B, Q3-quantized to fit 16GB VRAM) finished
+the same spec with a few test failures still open — bigger isn't
+automatically better locally once quantization is squeezed that hard.
+If local retries run out and `OPENAI_API_KEY` is set, `Escalate` runs
+instead of stopping; either way `Finalize` reports honestly (`SUCCESS`
+or exactly what's still open) rather than faking a pass.
 
 ## 3. Run the generated frontend
 
