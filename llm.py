@@ -43,32 +43,40 @@ def _approx_tokens(text: str) -> int:
 class Usage:
     """Running token/cost tally across the whole run, for the final cost summary.
 
-    Ollama and OpenAI tokens are tallied separately (not a proportional
-    guess over the whole run's total) — cost is computed only from real
-    OpenAI usage, since Ollama runs locally and is always $0. Also grouped
-    by `role` (plan/generate/review/repair/escalate) so the closing report
-    can show where calls/tokens actually went, not just a flat total.
+    Token counts are the REAL numbers each API returns (Ollama's
+    prompt_eval_count/eval_count, OpenAI's usage.prompt_tokens/
+    completion_tokens) — _approx_tokens() is only a fallback if a response
+    is ever missing them. OpenAI input and output tokens are kept separate
+    because they're priced differently. Also grouped by `role`
+    (generator/reviewer/repair/escalate) so the closing report shows where
+    calls/tokens actually went, not just a flat total.
     """
 
     calls: int = 0
     openai_calls: int = 0
     ollama_tokens: int = 0
-    openai_tokens: int = 0
+    openai_input_tokens: int = 0
+    openai_output_tokens: int = 0
     by_role: dict = field(default_factory=dict)  # role -> {"calls", "provider", "tokens"}
 
-    def add(self, provider: str, prompt: str, completion: str, role: str = "") -> None:
+    def add(self, provider: str, prompt_tokens: int, completion_tokens: int, role: str = "") -> None:
         self.calls += 1
-        tokens = _approx_tokens(prompt) + _approx_tokens(completion)
+        total = prompt_tokens + completion_tokens
         if provider == "openai":
             self.openai_calls += 1
-            self.openai_tokens += tokens
+            self.openai_input_tokens += prompt_tokens
+            self.openai_output_tokens += completion_tokens
         else:
-            self.ollama_tokens += tokens
+            self.ollama_tokens += total
 
         key = role or provider
         bucket = self.by_role.setdefault(key, {"calls": 0, "tokens": 0, "provider": provider})
         bucket["calls"] += 1
-        bucket["tokens"] += tokens
+        bucket["tokens"] += total
+
+    @property
+    def openai_tokens(self) -> int:
+        return self.openai_input_tokens + self.openai_output_tokens
 
     @property
     def approx_tokens(self) -> int:
@@ -76,17 +84,21 @@ class Usage:
 
     @property
     def approx_cost_usd(self) -> float:
-        # Only OPENAI_TOKENS are priced — Ollama contributes 0 regardless of
-        # volume. The $/1K rate is an estimate, not a real price table: this
-        # project doesn't know the actual billed rate for whatever model
-        # name ends up in OPENAI_MODEL (e.g. gpt-5.6-luna isn't a model this
-        # code has pricing data for). $0.01/1K (~$10/1M) is a deliberately
-        # modest placeholder in real OpenAI pricing's ballpark — NOT the old
-        # $0.50/1K default, which was ~30-1000x too high and made a run that
-        # actually spent a handful of dollars look like it spent tens.
-        # Set OPENAI_PRICE_PER_1K_TOKENS in .env to your real billed rate.
-        rate = float(os.environ.get("OPENAI_PRICE_PER_1K_TOKENS", "0.01"))
-        return round(self.openai_tokens / 1000 * rate, 4)
+        # Only OpenAI tokens are priced — Ollama is always $0 regardless of
+        # volume. Defaults are GPT-5.6 Luna's real published per-1M rates
+        # (openai.com/index/gpt-5-6), since that's the model this project's
+        # .env.example actually configures via OPENAI_MODEL. Input/output
+        # are priced separately because they cost differently. Override via
+        # OPENAI_INPUT_PRICE_PER_1M / OPENAI_OUTPUT_PRICE_PER_1M if
+        # OPENAI_MODEL points at a different GPT-5.6 tier:
+        #   Sol (flagship):   $5.00 in / $30.00 out
+        #   Terra (balanced): $2.00 in / $12.00 out
+        #   Luna (default):   $0.20 in /  $1.20 out
+        input_rate = float(os.environ.get("OPENAI_INPUT_PRICE_PER_1M", "0.20"))
+        output_rate = float(os.environ.get("OPENAI_OUTPUT_PRICE_PER_1M", "1.20"))
+        cost = self.openai_input_tokens / 1_000_000 * input_rate
+        cost += self.openai_output_tokens / 1_000_000 * output_rate
+        return round(cost, 4)
 
     def summary_line(self) -> str:
         """One-line grouped breakdown for the Finalize log — which roles
@@ -111,8 +123,9 @@ class LLMClient(ABC):
         self.timeout = timeout
 
     @abstractmethod
-    def _call(self, system: str, user: str) -> str:
-        """Provider-specific HTTP call. Returns the raw completion text."""
+    def _call(self, system: str, user: str) -> tuple[str, int, int]:
+        """Provider-specific HTTP call. Returns (text, prompt_tokens, completion_tokens) —
+        real counts from the API's own response, not an estimate."""
 
     def complete(self, system: str, user: str, *, role: str = "") -> str:
         """Run one completion and log the outcome under the LLM stage.
@@ -127,7 +140,7 @@ class LLMClient(ABC):
         start = time.monotonic()
         for attempt in (1, 2):
             try:
-                text = self._call(system, user)
+                text, prompt_tokens, completion_tokens = self._call(system, user)
                 break
             except requests.exceptions.RequestException as exc:
                 if attempt == 2:
@@ -142,10 +155,10 @@ class LLMClient(ABC):
                 )
                 time.sleep(2)
         elapsed = time.monotonic() - start
-        usage.add(self.provider, system + user, text, role=label)
+        usage.add(self.provider, prompt_tokens, completion_tokens, role=label)
         logger.info(
             f"{label} -> {self.provider}:{self.model} "
-            f"(ok, ~{_approx_tokens(system + user + text)} tok, {elapsed:.1f}s)",
+            f"(ok, {prompt_tokens}+{completion_tokens} tok, {elapsed:.1f}s)",
             extra={"stage": "llm"},
         )
         return text
@@ -177,7 +190,7 @@ class OllamaClient(LLMClient):
                 "or point CODE_GENERATOR_MODEL/CODE_REVIEW_MODEL at a different model."
             )
 
-    def _call(self, system: str, user: str) -> str:
+    def _call(self, system: str, user: str) -> tuple[str, int, int]:
         resp = requests.post(
             f"{self.base_url}/api/chat",
             json={
@@ -191,7 +204,13 @@ class OllamaClient(LLMClient):
             timeout=self.timeout,
         )
         resp.raise_for_status()
-        return resp.json()["message"]["content"]
+        data = resp.json()
+        text = data["message"]["content"]
+        # Ollama returns real counts (its own tokenizer) in a non-streamed
+        # response; fall back to the char estimate only if a field is missing.
+        prompt_tokens = data.get("prompt_eval_count") or _approx_tokens(system + user)
+        completion_tokens = data.get("eval_count") or _approx_tokens(text)
+        return text, prompt_tokens, completion_tokens
 
 
 class OpenAIClient(LLMClient):
@@ -208,7 +227,7 @@ class OpenAIClient(LLMClient):
                 "(see .env.example)."
             )
 
-    def _call(self, system: str, user: str) -> str:
+    def _call(self, system: str, user: str) -> tuple[str, int, int]:
         resp = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -224,7 +243,14 @@ class OpenAIClient(LLMClient):
         if resp.status_code == 404:
             raise LLMConfigError(f"OpenAI model '{self.model}' not found (404): {resp.text}")
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        # OpenAI always returns real counts in `usage`; fall back to the
+        # char estimate only if that field is ever missing.
+        api_usage = data.get("usage") or {}
+        prompt_tokens = api_usage.get("prompt_tokens") or _approx_tokens(system + user)
+        completion_tokens = api_usage.get("completion_tokens") or _approx_tokens(text)
+        return text, prompt_tokens, completion_tokens
 
 
 class LLMClientFactory:

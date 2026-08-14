@@ -296,12 +296,14 @@ def finalize_node(state: AgentState) -> dict:
         f"review={'PASS' if review_ok else 'FAIL'}, retries={state.get('retry_count', 0)}, "
         f"escalated={state.get('escalated', False)}",
     )
+    in_rate = os.environ.get("OPENAI_INPUT_PRICE_PER_1M", "0.20")
+    out_rate = os.environ.get("OPENAI_OUTPUT_PRICE_PER_1M", "1.20")
     _log(
         "finalize",
         f"usage: ollama {llm_usage.ollama_tokens} tok / $0  |  "
-        f"openai {llm_usage.openai_tokens} tok / ~${llm_usage.approx_cost_usd} "
-        f"(est. @ $"
-        f"{os.environ.get('OPENAI_PRICE_PER_1K_TOKENS', '0.01')}/1k, set OPENAI_PRICE_PER_1K_TOKENS for the real rate)",
+        f"openai {llm_usage.openai_input_tokens} in + {llm_usage.openai_output_tokens} out tok "
+        f"/ ~${llm_usage.approx_cost_usd} (@ ${in_rate}/1M in, ${out_rate}/1M out — "
+        "override with OPENAI_INPUT_PRICE_PER_1M/OPENAI_OUTPUT_PRICE_PER_1M)",
     )
     if llm_usage.by_role:
         _log("finalize", f"by stage: {llm_usage.summary_line()}")
