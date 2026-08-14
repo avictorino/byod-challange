@@ -16,6 +16,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import tools
+from graph import build_graph
+from llm import LLMConfigError
+
 STAGE_WIDTH = 8
 
 
@@ -92,9 +96,29 @@ def main(argv: list[str] | None = None) -> int:
         f"max_retries={args.max_retries}",
     )
 
-    # The LangGraph pipeline (inspect -> plan -> generate -> validate -> review ->
-    # repair -> finalize) is wired up incrementally in the next commits.
-    log(logger, "todo", "orchestration graph not wired up yet — see graph.py in upcoming commits")
+    log(logger, "scaffold", f"copying {boilerplate_path} -> {output_path}")
+    tools.scaffold_output(boilerplate_path, output_path)
+
+    app = build_graph()
+    initial_state = {
+        "spec": spec_path.read_text(encoding="utf-8"),
+        "output_dir": str(output_path),
+        "boilerplate_context": "",
+        "tasks": [],
+        "generated_files": {},
+        "validation": {},
+        "review": {},
+        "retry_count": 0,
+        "max_retries": args.max_retries,
+    }
+
+    try:
+        final_state = app.invoke(initial_state)
+    except LLMConfigError as exc:
+        log(logger, "error", str(exc))
+        return 1
+
+    log(logger, "done", f"generated {len(final_state.get('generated_files', {}))} file(s)")
     return 0
 
 
