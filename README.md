@@ -128,46 +128,66 @@ own.
 | `FINALIZE` | Closing summary: files, validation, retries, real token/cost usage | `finalize_node` |
 | `DONE` / `ERROR` | CLI exit, after the graph has already returned | No |
 
-A representative example (trimmed, values from real runs) — one repair
-round that resolves everything, no escalation needed:
+A real, unedited run — `CODE_GENERATOR_MODEL=gpt-5.6-terra`,
+`CODE_REVIEW_MODEL=gpt-5.6-luna` (see "Models used to build this" for how
+to point `.env` at OpenAI instead of Ollama) — one repair round, no
+escalation needed, and a clean `PASS`:
 
 ```
-[14:38:31] START    spec=spec.txt output=generated-app boilerplate=Fullstack-Coding-Challenge-main max_retries=2
-[14:38:31] SCAFFOLD copying Fullstack-Coding-Challenge-main -> generated-app
-[14:38:38] SCAFFOLD npm install (this can take a minute)...
-[14:39:10] INSPECT  read 12 files, built boilerplate context (3551 chars)
-[14:39:10] FACTORY  generator -> ollama:qwen2.5-coder:14b
-[14:39:10] PLAN     decomposing spec into ordered file tasks...
-[14:39:26] LLM      generator -> ollama:qwen2.5-coder:14b (ok, 2100+430 tok, 16.0s)
-[14:39:26] PLAN     planned 5 file(s): src/hooks/useCars.ts, src/components/CarCard.tsx, ...
-[14:39:26] FACTORY  generator -> ollama:qwen2.5-coder:14b
-[14:39:31] LLM      generator -> ollama:qwen2.5-coder:14b (ok, 1200+310 tok, 5.0s)
-[14:39:31] GENERATE src/hooks/useCars.ts
+[16:01:55] START    spec=spec.txt output=generated-app boilerplate=Fullstack-Coding-Challenge-main max_retries=2
+[16:01:55] SCAFFOLD copying Fullstack-Coding-Challenge-main -> generated-app
+[16:02:01] SCAFFOLD npm install (this can take a minute)...
+[16:02:32] INSPECT  read 12 files, built boilerplate context (3551 chars)
+[16:02:32] FACTORY  generator -> openai:gpt-5.6-terra
+[16:02:32] PLAN     decomposing spec into ordered file tasks...
+[16:03:07] LLM      generator -> openai:gpt-5.6-terra (ok, 2777+889 tok, 34.4s)
+[16:03:07] PLAN     planned 6 file(s): src/hooks/useCars.ts, src/components/CarCard.tsx, src/components/AddCarForm.tsx, src/components/CarList.tsx, src/App.tsx, src/__tests__/CarList.test.tsx
+[16:03:07] FACTORY  generator -> openai:gpt-5.6-terra
+[16:03:18] LLM      generator -> openai:gpt-5.6-terra (ok, 2625+129 tok, 11.8s)
+[16:03:18] GENERATE src/hooks/useCars.ts
 ...                                              (one FACTORY+LLM+GENERATE per planned file)
-[14:40:23] VALIDATE npm run typecheck
-[14:40:29] VALIDATE typecheck FAIL
-[14:40:29] VALIDATE npm run test
-[14:41:07] VALIDATE test FAIL
-[14:41:07] FACTORY  reviewer -> ollama:qwen2.5-coder:14b
-[14:41:07] REVIEW   checking generated files against the spec + validation output...
-[14:41:20] LLM      reviewer -> ollama:qwen2.5-coder:14b (ok, 3900+210 tok, 12.7s)
-[14:41:20] REVIEW   FAIL (2 issue(s))
-[14:41:20] FACTORY  generator -> ollama:qwen2.5-coder:14b
-[14:41:34] LLM      repair -> ollama:qwen2.5-coder:14b (ok, 2800+340 tok, 14.4s)
-[14:41:34] REPAIR   retry 1/2 -> src/components/CarCard.tsx
-...                                              (one FACTORY+LLM+REPAIR per implicated file)
-[14:42:22] VALIDATE npm run typecheck
-[14:42:25] VALIDATE typecheck OK
-[14:42:25] VALIDATE npm run test
-[14:42:33] VALIDATE test OK
-[14:42:33] FACTORY  reviewer -> ollama:qwen2.5-coder:14b
-[14:42:40] LLM      reviewer -> ollama:qwen2.5-coder:14b (ok, 3200+90 tok, 7.5s)
-[14:42:40] REVIEW   PASS (0 issue(s))
-[14:42:40] FINALIZE SUCCESS — 5 file(s), typecheck=OK, test=OK, review=PASS, retries=1, escalated=False
-[14:42:40] FINALIZE usage: ollama 42318 tok / $0  |  openai 0 in + 0 out tok / ~$0.0 (@ $0.20/1M in, $1.20/1M out — override with OPENAI_INPUT_PRICE_PER_1M/OPENAI_OUTPUT_PRICE_PER_1M)
-[14:42:40] FINALIZE by stage: generator=6call/24800tok/ollama repair=5call/12200tok/ollama reviewer=2call/5318tok/ollama
-[14:42:40] DONE     run `cd generated-app && npm run dev` to try the app
+[16:05:25] GENERATE src/__tests__/CarList.test.tsx
+[16:05:25] VALIDATE npm run typecheck
+[16:05:29] VALIDATE typecheck FAIL
+[16:05:29] VALIDATE npm run test
+[16:05:53] VALIDATE test OK
+[16:05:53] FACTORY  reviewer -> openai:gpt-5.6-luna
+[16:05:53] REVIEW   checking generated files against the spec + validation output...
+[16:05:55] LLM      reviewer -> openai:gpt-5.6-luna (ok, 3740+96 tok, 2.5s)
+[16:05:55] REVIEW   FAIL (1 issue(s))
+[16:05:55] FACTORY  generator -> openai:gpt-5.6-terra
+[16:06:00] LLM      repair -> openai:gpt-5.6-terra (ok, 3440+587 tok, 4.7s)
+[16:06:00] REPAIR   retry 1/2 -> src/components/CarList.tsx
+[16:06:00] VALIDATE npm run typecheck
+[16:06:03] VALIDATE typecheck OK
+[16:06:03] VALIDATE npm run test
+[16:06:07] VALIDATE test OK
+[16:06:07] FACTORY  reviewer -> openai:gpt-5.6-luna
+[16:06:07] REVIEW   checking generated files against the spec + validation output...
+[16:06:14] LLM      reviewer -> openai:gpt-5.6-luna (ok, 3590+529 tok, 6.9s)
+[16:06:14] REVIEW   PASS (0 issue(s))
+[16:06:14] FINALIZE SUCCESS — 6 file(s), typecheck=OK, test=OK, review=PASS, retries=1, escalated=False
+[16:06:14] FINALIZE usage: ollama 0 tok / $0  |  openai 31769 in + 5932 out tok / ~$0.0135 (@ $0.20/1M in, $1.20/1M out — override with OPENAI_INPUT_PRICE_PER_1M/OPENAI_OUTPUT_PRICE_PER_1M)
+[16:06:14] FINALIZE by stage: generator=7call/25719tok/openai repair=1call/4027tok/openai reviewer=2call/7955tok/openai
+[16:06:14] DONE     run `cd generated-app && npm run dev` to try the app
 ```
+
+Note the real cost: **$0.0135** for a full run, since `gpt-5.6-terra`/
+`gpt-5.6-luna` are cheap per-token and this converged in a single repair
+round — much less than a rough per-token guess would suggest, because
+fewer retries (needing fewer calls) matters more than the per-token rate
+does.
+
+**For comparison**, the same spec against a much larger *local* model —
+a community 27B parameter, Q3-quantized build squeezed to just fit a
+16GB GPU (`SetneufPT/Qwen3.6-27B-MTP_Q3_32K_16GB-GPU`) — did not reach
+this clean a result. It ran to completion but finished with a few
+simple test failures still open, unlike the OpenAI run above. Bigger
+isn't automatically better locally: an aggressive Q3 quantization
+squeezed to just barely fit 16GB trades real per-weight quality for
+parameter count, and can end up behind either a well-quantized smaller
+model (`qwen2.5-coder:14b`, Q4_K_M) or a hosted model with no such
+VRAM ceiling at all.
 
 If `Review` still fails after every local retry and `OPENAI_API_KEY` is
 set, you'd see `ROUTE ... trying one escalation`, then a block of
