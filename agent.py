@@ -96,15 +96,6 @@ def main(argv: list[str] | None = None) -> int:
         f"max_retries={args.max_retries}",
     )
 
-    log(logger, "scaffold", f"copying {boilerplate_path} -> {output_path}")
-    tools.scaffold_output(boilerplate_path, output_path)
-
-    log(logger, "scaffold", "npm install (this can take a minute)...")
-    install_code, install_out = tools.run_cmd(["npm", "install"], cwd=output_path, timeout=600)
-    if install_code != 0:
-        log(logger, "error", f"npm install failed:\n{install_out[-2000:]}")
-        return 1
-
     app = build_graph()
     initial_state = {
         "spec": spec_path.read_text(encoding="utf-8"),
@@ -120,6 +111,15 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     try:
+        log(logger, "scaffold", f"copying {boilerplate_path} -> {output_path}")
+        tools.scaffold_output(boilerplate_path, output_path)
+
+        log(logger, "scaffold", "npm install (this can take a minute)...")
+        install_code, install_out = tools.run_cmd(["npm", "install"], cwd=output_path, timeout=600)
+        if install_code != 0:
+            log(logger, "error", f"npm install failed:\n{install_out[-2000:]}")
+            return 1
+
         final_state = app.invoke(initial_state)
     except LLMConfigError as exc:
         log(logger, "error", f"configuration problem: {exc}")

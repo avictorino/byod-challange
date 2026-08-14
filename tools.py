@@ -22,7 +22,16 @@ _SKIP_DIRS = {"node_modules", ".git", "dist", ".vite"}
 def scaffold_output(boilerplate_dir: Path, output_dir: Path) -> None:
     """Copy the boilerplate into output_dir, replacing whatever was there."""
     if output_dir.exists():
-        shutil.rmtree(output_dir)
+        try:
+            shutil.rmtree(output_dir)
+        except PermissionError as exc:
+            # Common on Windows: a leftover `npm run dev`/vite process still
+            # has a file (usually esbuild.exe) open under output_dir/node_modules.
+            raise RuntimeError(
+                f"Can't remove {output_dir} — a file is locked ({exc.filename}). "
+                "Close any running `npm run dev`/`npm run test:watch` (or other "
+                "process) using that folder, then re-run."
+            ) from exc
     shutil.copytree(boilerplate_dir, output_dir, ignore=shutil.ignore_patterns(*_SKIP_DIRS))
 
 
