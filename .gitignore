@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Generated app output (node deps/build artifacts only — source is committed as the sample)
+generated-app/node_modules/
+generated-app/dist/
+generated-app/.vite/
+
+# Reference boilerplate + assessment doc are not part of this repo's work
+/Fullstack-Coding-Challenge-main/
+/*.pdf
