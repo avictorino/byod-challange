@@ -24,9 +24,13 @@ Requirements:
 6. Extract all GraphQL data-fetching logic for the car list into a
    reusable useCars() hook (loading, error and data state), instead of
    calling useQuery directly inside components.
-7. Add unit tests for at least the car list/card component and the
-   search/sort behavior, following the existing testing patterns in the
-   project (MockedProvider, Testing Library).
+7. Add unit tests for the car list component — exactly two test cases:
+   one that it renders car data from the GetCars query, and one that the
+   search input filters the list by model (case-insensitive, partial
+   match). Follow the existing testing patterns in the project
+   (MockedProvider, Testing Library), matching the same scope and depth
+   as the reference Example.test.tsx. Do not add further test cases
+   (e.g. sorting, loading state, add-car) beyond these two.
 
 Keep the UI functional and reasonably tidy; visual polish is not the
 priority.
