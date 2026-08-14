@@ -295,7 +295,8 @@ def finalize_node(state: AgentState) -> dict:
         f"typecheck={'OK' if tc_ok else 'FAIL'}, test={'OK' if test_ok else 'FAIL'}, "
         f"review={'PASS' if review_ok else 'FAIL'}, retries={state.get('retry_count', 0)}, "
         f"escalated={state.get('escalated', False)}, "
-        f"~{llm_usage.approx_tokens} tokens (~${llm_usage.approx_cost_usd})",
+        f"~{llm_usage.ollama_tokens} tokens local (ollama, $0) + "
+        f"~{llm_usage.openai_tokens} tokens openai (~${llm_usage.approx_cost_usd})",
     )
     if not ok:
         for issue in state.get("review", {}).get("issues", []):

@@ -63,6 +63,9 @@ the repair loop gets one last-resort attempt on OpenAI (`OPENAI_MODEL`)
 after local retries are exhausted and still failing — free/local is
 always tried first, OpenAI only spends real tokens as a final fallback,
 at most once per run. Leave it unset to skip escalation entirely.
+`Finalize`'s cost estimate only ever prices real OpenAI token usage
+(Ollama is always $0); set `OPENAI_PRICE_PER_1K_TOKENS` to your account's
+actual billed rate for an accurate number — the default is a placeholder.
 
 ## 2. Run the agent
 

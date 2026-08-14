@@ -41,28 +41,41 @@ def _approx_tokens(text: str) -> int:
 
 @dataclass
 class Usage:
-    """Running token/cost tally across the whole run, for the final cost summary."""
+    """Running token/cost tally across the whole run, for the final cost summary.
+
+    Ollama and OpenAI tokens are tallied separately (not a proportional
+    guess over the whole run's total) — cost is computed only from real
+    OpenAI usage, since Ollama runs locally and is always $0.
+    """
 
     calls: int = 0
-    approx_tokens: int = 0
     openai_calls: int = 0
+    ollama_tokens: int = 0
+    openai_tokens: int = 0
 
     def add(self, provider: str, prompt: str, completion: str) -> None:
         self.calls += 1
-        self.approx_tokens += _approx_tokens(prompt) + _approx_tokens(completion)
+        tokens = _approx_tokens(prompt) + _approx_tokens(completion)
         if provider == "openai":
             self.openai_calls += 1
+            self.openai_tokens += tokens
+        else:
+            self.ollama_tokens += tokens
+
+    @property
+    def approx_tokens(self) -> int:
+        return self.ollama_tokens + self.openai_tokens
 
     @property
     def approx_cost_usd(self) -> float:
-        # Ollama runs locally and is free. Only OpenAI calls carry a $ cost.
-        # $0.50 / 1K tokens is a conservative flat estimate (the real OpenAI
-        # model id is whatever the user put in .env, so we can't look up an
-        # exact price table for it).
-        if self.openai_calls == 0 or self.calls == 0:
-            return 0.0
-        openai_share = self.approx_tokens * (self.openai_calls / self.calls)
-        return round(openai_share / 1000 * 0.50, 4)
+        # Only OPENAI_TOKENS are priced — Ollama contributes 0 regardless of
+        # volume. The $/1K rate is an estimate, not a real price table: this
+        # project doesn't know the actual billed rate for whatever model
+        # name ends up in OPENAI_MODEL (e.g. gpt-5.6-luna isn't a model this
+        # code has pricing data for). Set OPENAI_PRICE_PER_1K_TOKENS in .env
+        # to your real billed rate for an accurate number.
+        rate = float(os.environ.get("OPENAI_PRICE_PER_1K_TOKENS", "0.50"))
+        return round(self.openai_tokens / 1000 * rate, 4)
 
 
 usage = Usage()
