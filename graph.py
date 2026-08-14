@@ -142,7 +142,7 @@ def generate_node(state: AgentState) -> dict:
 
     for task in state["tasks"]:
         deps = {p: generated[p] for p in task.get("depends_on", []) if p in generated}
-        system, user = prompts.generate_prompt(task, state["boilerplate_context"], deps)
+        system, user = prompts.generate_prompt(task, state["spec"], state["boilerplate_context"], deps)
         raw = llm.complete(system, user, role="generator")
         content = tools.extract_code_block(raw)
         tools.write_file(root, task["path"], content)
@@ -242,7 +242,9 @@ def _repair_files(llm: LLMClient, state: AgentState, stage: str, label: str) -> 
     }
 
     for path, problem_text in problems.items():
-        system, user = prompts.repair_prompt(path, generated[path], problem_text, state["boilerplate_context"])
+        system, user = prompts.repair_prompt(
+            path, generated[path], problem_text, state["spec"], state["boilerplate_context"]
+        )
         raw = llm.complete(system, user, role=stage)
         content = tools.extract_code_block(raw)
         tools.write_file(root, path, content)

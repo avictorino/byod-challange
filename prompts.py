@@ -20,6 +20,13 @@ Project conventions (do not violate these):
   (e.g. `React.FormEvent`). Prefer named imports (`useState`, `useEffect`,
   and `type FormEvent`, `type ChangeEvent`, ...) instead — an unused default
   React import fails the strict noUnusedLocals check.
+- While data is loading (Apollo `useQuery`'s `loading` is true), render
+  MUI's `<CircularProgress />` — like the reference `Example.tsx` does —
+  never a plain text placeholder such as `<Typography>Loading...</Typography>`.
+  This isn't just style: `CircularProgress` has an implicit `progressbar`
+  ARIA role, which is how loading states are queried in tests
+  (`getByRole("progressbar")`); a text placeholder can't be found that way
+  and any such query will fail even though the component behaves correctly.
 - MUI v6 `Select`'s `onChange` is typed `(event: SelectChangeEvent<T>, child:
   ReactNode) => void` — import `SelectChangeEvent` from "@mui/material" and
   type handlers with it. Do NOT use the old MUI v4 pattern
@@ -104,6 +111,7 @@ def plan_prompt(spec: str, boilerplate_context: str) -> tuple[str, str]:
 
 def generate_prompt(
     task: dict,
+    spec: str,
     boilerplate_context: str,
     dependency_files: dict[str, str],
 ) -> tuple[str, str]:
@@ -122,6 +130,10 @@ def generate_prompt(
     )
     user = (
         f"{CONVENTIONS}\n"
+        f"Full product spec (the task below is one piece of this — if the "
+        f"spec gives a precise constraint for this file, e.g. an exact "
+        f"number of test cases, follow the spec's exact wording over the "
+        f"shorter task description):\n{spec}\n\n"
         f"Boilerplate context:\n{boilerplate_context}\n\n"
         f"Already-generated dependency files:\n{deps_block}\n\n"
         f"Task: generate `{task['path']}`\n"
@@ -167,6 +179,7 @@ def repair_prompt(
     path: str,
     current_content: str,
     problems: str,
+    spec: str,
     boilerplate_context: str,
 ) -> tuple[str, str]:
     system = (
@@ -175,12 +188,15 @@ def repair_prompt(
         "fixes the listed problems — preserve the file's existing structure, "
         "exports and overall approach unless a problem specifically requires "
         "changing them. Do not rewrite the file from scratch or switch to a "
-        "different pattern. Respond with ONLY a single fenced code block "
-        "containing the file's COMPLETE corrected contents — no explanation "
-        "before or after it."
+        "different pattern, and do not add anything beyond what the spec "
+        "asks for while fixing an unrelated problem. Respond with ONLY a "
+        "single fenced code block containing the file's COMPLETE corrected "
+        "contents — no explanation before or after it."
     )
     user = (
         f"{CONVENTIONS}\n"
+        f"Full product spec (for constraints the fix must still respect, "
+        f"e.g. an exact number of test cases):\n{spec}\n\n"
         f"Boilerplate context:\n{boilerplate_context}\n\n"
         f"File to fix: `{path}`\n\n"
         f"Current contents:\n```\n{current_content}\n```\n\n"
