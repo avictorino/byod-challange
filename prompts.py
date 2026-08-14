@@ -20,6 +20,11 @@ Project conventions (do not violate these):
   (e.g. `React.FormEvent`). Prefer named imports (`useState`, `useEffect`,
   and `type FormEvent`, `type ChangeEvent`, ...) instead — an unused default
   React import fails the strict noUnusedLocals check.
+- MUI v6 `Select`'s `onChange` is typed `(event: SelectChangeEvent<T>, child:
+  ReactNode) => void` — import `SelectChangeEvent` from "@mui/material" and
+  type handlers with it. Do NOT use the old MUI v4 pattern
+  `(event: React.ChangeEvent<{ value: unknown }>) => void`; it does not
+  typecheck against this version.
 - Generate exactly one file with exactly one default export (or the named
   exports its task describes). Never bundle a second component/module into
   the same reply, and never emit more than one `export default` — if a small
