@@ -88,10 +88,9 @@ always tried first, OpenAI only spends real tokens as a final fallback,
 at most once per run. Leave it unset to skip escalation entirely.
 `Finalize`'s cost estimate uses the exact input/output token counts each
 API returns (not an estimate) and prices only real OpenAI usage — Ollama
-is always $0. Rates default to GPT-5.6 Luna's real published pricing
-($0.20/1M in, $1.20/1M out); set `OPENAI_INPUT_PRICE_PER_1M` /
-`OPENAI_OUTPUT_PRICE_PER_1M` if `OPENAI_MODEL` points at Sol or Terra
-instead (see `.env.example` for their rates).
+is always $0. Set `OPENAI_INPUT_PRICE_PER_1M` / `OPENAI_OUTPUT_PRICE_PER_1M`
+to match whichever model `OPENAI_MODEL` actually points at (see
+`.env.example` for the per-tier rates).
 
 ## 2. Run the agent
 
