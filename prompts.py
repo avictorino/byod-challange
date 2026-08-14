@@ -33,6 +33,14 @@ Project conventions (do not violate these):
   `await screen.findByRole(...)`). Do this in EVERY test case that renders
   the component, not just the first one in the file — a `getBy*` called
   before the mock resolves fails even though the query itself is correct.
+- Never assert on a single literal string that concatenates multiple
+  dynamic fields (e.g. `"2024 Toyota Camry"` for year+make+model) — the
+  component you're testing may render each field in its own separate
+  element, in which case that exact combined text never exists as one
+  DOM node and the query fails even though the UI is correct. Query each
+  field independently instead: e.g. `await screen.findByText(String(car.year))`
+  for one, then `screen.getByText(new RegExp(\`${car.make}.*${car.model}\`, "i"))`
+  (or separate calls per field) rather than one exact literal string.
 - To assert the ORDER of a rendered list (e.g. after sorting), query for
   ALL matching elements in a single call — `screen.getAllByRole(...)`,
   `screen.getAllByText(...)`, or `container.querySelectorAll(...)` — which
