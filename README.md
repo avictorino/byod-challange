@@ -30,6 +30,7 @@ diagram mirrors.
 
 ## 1. Install the agent (venv)
 
+Windows (PowerShell):
 ```bash
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -37,12 +38,31 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Edit `.env` with the Ollama/OpenAI models to use (`CODE_GENERATOR_MODEL`,
-`CODE_REVIEW_MODEL`). `OPENAI_API_KEY` is optional: if set, the repair loop
-gets one last-resort attempt on OpenAI (`OPENAI_MODEL`) after local
-retries are exhausted and still failing — free/local is always tried first,
-OpenAI only spends real tokens as a final fallback, at most once per run.
-Leave it unset to run 100% local.
+macOS/Linux:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+- **Fastest path (no local model download):** set both
+  `CODE_GENERATOR_MODEL` and `CODE_REVIEW_MODEL` to an OpenAI model id
+  (e.g. `gpt-4o-mini` — any name without a `:`) and fill in
+  `OPENAI_API_KEY`. No Ollama needed at all.
+- **Local path:** leave the Ollama tag defaults (e.g.
+  `qwen2.5-coder:14b`) and run `ollama pull <that model>` first — needs
+  Ollama installed and `ollama serve` running. If the model isn't pulled,
+  the agent fails immediately with a clear message telling you what to
+  pull or which env var to change — it won't hang or crash.
+
+`OPENAI_API_KEY` is also optional on top of either path above: if set,
+the repair loop gets one last-resort attempt on OpenAI (`OPENAI_MODEL`)
+after local retries are exhausted and still failing — free/local is
+always tried first, OpenAI only spends real tokens as a final fallback,
+at most once per run. Leave it unset to skip escalation entirely.
 
 ## 2. Run the agent
 
