@@ -294,10 +294,17 @@ def finalize_node(state: AgentState) -> dict:
         f"{len(state.get('generated_files', {}))} file(s), "
         f"typecheck={'OK' if tc_ok else 'FAIL'}, test={'OK' if test_ok else 'FAIL'}, "
         f"review={'PASS' if review_ok else 'FAIL'}, retries={state.get('retry_count', 0)}, "
-        f"escalated={state.get('escalated', False)}, "
-        f"~{llm_usage.ollama_tokens} tokens local (ollama, $0) + "
-        f"~{llm_usage.openai_tokens} tokens openai (~${llm_usage.approx_cost_usd})",
+        f"escalated={state.get('escalated', False)}",
     )
+    _log(
+        "finalize",
+        f"usage: ollama {llm_usage.ollama_tokens} tok / $0  |  "
+        f"openai {llm_usage.openai_tokens} tok / ~${llm_usage.approx_cost_usd} "
+        f"(est. @ $"
+        f"{os.environ.get('OPENAI_PRICE_PER_1K_TOKENS', '0.01')}/1k, set OPENAI_PRICE_PER_1K_TOKENS for the real rate)",
+    )
+    if llm_usage.by_role:
+        _log("finalize", f"by stage: {llm_usage.summary_line()}")
     if not ok:
         for issue in state.get("review", {}).get("issues", []):
             _log("finalize", f"unresolved: {issue.get('file', '?')}: {issue.get('problem', '')}")

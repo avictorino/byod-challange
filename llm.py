@@ -16,7 +16,7 @@ import logging
 import os
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import requests
@@ -45,15 +45,18 @@ class Usage:
 
     Ollama and OpenAI tokens are tallied separately (not a proportional
     guess over the whole run's total) — cost is computed only from real
-    OpenAI usage, since Ollama runs locally and is always $0.
+    OpenAI usage, since Ollama runs locally and is always $0. Also grouped
+    by `role` (plan/generate/review/repair/escalate) so the closing report
+    can show where calls/tokens actually went, not just a flat total.
     """
 
     calls: int = 0
     openai_calls: int = 0
     ollama_tokens: int = 0
     openai_tokens: int = 0
+    by_role: dict = field(default_factory=dict)  # role -> {"calls", "provider", "tokens"}
 
-    def add(self, provider: str, prompt: str, completion: str) -> None:
+    def add(self, provider: str, prompt: str, completion: str, role: str = "") -> None:
         self.calls += 1
         tokens = _approx_tokens(prompt) + _approx_tokens(completion)
         if provider == "openai":
@@ -61,6 +64,11 @@ class Usage:
             self.openai_tokens += tokens
         else:
             self.ollama_tokens += tokens
+
+        key = role or provider
+        bucket = self.by_role.setdefault(key, {"calls": 0, "tokens": 0, "provider": provider})
+        bucket["calls"] += 1
+        bucket["tokens"] += tokens
 
     @property
     def approx_tokens(self) -> int:
@@ -72,10 +80,22 @@ class Usage:
         # volume. The $/1K rate is an estimate, not a real price table: this
         # project doesn't know the actual billed rate for whatever model
         # name ends up in OPENAI_MODEL (e.g. gpt-5.6-luna isn't a model this
-        # code has pricing data for). Set OPENAI_PRICE_PER_1K_TOKENS in .env
-        # to your real billed rate for an accurate number.
-        rate = float(os.environ.get("OPENAI_PRICE_PER_1K_TOKENS", "0.50"))
+        # code has pricing data for). $0.01/1K (~$10/1M) is a deliberately
+        # modest placeholder in real OpenAI pricing's ballpark — NOT the old
+        # $0.50/1K default, which was ~30-1000x too high and made a run that
+        # actually spent a handful of dollars look like it spent tens.
+        # Set OPENAI_PRICE_PER_1K_TOKENS in .env to your real billed rate.
+        rate = float(os.environ.get("OPENAI_PRICE_PER_1K_TOKENS", "0.01"))
         return round(self.openai_tokens / 1000 * rate, 4)
+
+    def summary_line(self) -> str:
+        """One-line grouped breakdown for the Finalize log — which roles
+        actually made calls, to which provider, and how many tokens each."""
+        parts = [
+            f"{role}={b['calls']}call/{b['tokens']}tok/{b['provider']}"
+            for role, b in sorted(self.by_role.items())
+        ]
+        return " ".join(parts)
 
 
 usage = Usage()
@@ -122,7 +142,7 @@ class LLMClient(ABC):
                 )
                 time.sleep(2)
         elapsed = time.monotonic() - start
-        usage.add(self.provider, system + user, text)
+        usage.add(self.provider, system + user, text, role=label)
         logger.info(
             f"{label} -> {self.provider}:{self.model} "
             f"(ok, ~{_approx_tokens(system + user + text)} tok, {elapsed:.1f}s)",
