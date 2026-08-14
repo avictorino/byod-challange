@@ -73,7 +73,7 @@ class LLMClient(ABC):
 
     provider: str = "base"
 
-    def __init__(self, model: str, timeout: int = 120):
+    def __init__(self, model: str, timeout: int = 240):
         self.model = model
         self.timeout = timeout
 
@@ -82,17 +82,32 @@ class LLMClient(ABC):
         """Provider-specific HTTP call. Returns the raw completion text."""
 
     def complete(self, system: str, user: str, *, role: str = "") -> str:
-        """Run one completion and log the outcome under the LLM stage."""
+        """Run one completion and log the outcome under the LLM stage.
+
+        One transient-network retry (timeout/connection reset) against the
+        SAME configured provider — not a fallback to a different one, just
+        the ordinary resilience a local model under load needs. A large
+        generation prompt legitimately took >120s during testing, hence
+        both this retry and the higher default timeout above.
+        """
         label = role or self.provider
         start = time.monotonic()
-        try:
-            text = self._call(system, user)
-        except Exception as exc:
-            logger.info(
-                f"{label} -> {self.provider}:{self.model} FAILED ({exc})",
-                extra={"stage": "llm"},
-            )
-            raise
+        for attempt in (1, 2):
+            try:
+                text = self._call(system, user)
+                break
+            except requests.exceptions.RequestException as exc:
+                if attempt == 2:
+                    logger.info(
+                        f"{label} -> {self.provider}:{self.model} FAILED ({exc})",
+                        extra={"stage": "llm"},
+                    )
+                    raise
+                logger.info(
+                    f"{label} -> {self.provider}:{self.model} network error ({exc}), retrying once...",
+                    extra={"stage": "llm"},
+                )
+                time.sleep(2)
         elapsed = time.monotonic() - start
         usage.add(self.provider, system + user, text)
         logger.info(

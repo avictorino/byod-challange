@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 _SKIP_DIRS = {"node_modules", ".git", "dist", ".vite"}
@@ -99,3 +100,31 @@ def topo_sort(tasks: list[dict]) -> list[dict]:
             del remaining[path]
 
     return ordered
+
+
+# ---------------------------------------------------------------------------
+# Shell commands — `npm install` / `npm run typecheck` / `npm run test` run
+# for real inside the generated app; this is the mechanical half of
+# self-validation (the LLM review in graph.py is the semantic half).
+# ---------------------------------------------------------------------------
+
+
+def run_cmd(cmd: list[str], cwd: Path, timeout: int = 600) -> tuple[int, str]:
+    """Run a command, returning (exit_code, combined stdout+stderr).
+
+    `shell=True` is needed on Windows to resolve `npm`; a timeout guards
+    against a hung install/test run instead of blocking the pipeline forever.
+    """
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or "") + (exc.stderr or "")
+        return 1, output + f"\n[timed out after {timeout}s]"
+    return result.returncode, (result.stdout or "") + (result.stderr or "")

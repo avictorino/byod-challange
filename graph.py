@@ -139,6 +139,32 @@ def generate_node(state: AgentState) -> dict:
     return {"generated_files": generated}
 
 
+def validate_node(state: AgentState) -> dict:
+    """Run the generated app's own typecheck and test suite — for real.
+
+    This is the mechanical half of self-validation (the LLM `review` node
+    added in the next commit is the semantic half). No test framework is
+    invented here: it's exactly `npm run typecheck` / `npm run test`,
+    already wired up by the boilerplate.
+    """
+    root = Path(state["output_dir"])
+
+    _log("validate", "npm run typecheck")
+    tc_code, tc_out = tools.run_cmd(["npm", "run", "typecheck"], cwd=root)
+    _log("validate", f"typecheck {'OK' if tc_code == 0 else 'FAIL'}")
+
+    _log("validate", "npm run test")
+    test_code, test_out = tools.run_cmd(["npm", "run", "test"], cwd=root)
+    _log("validate", f"test {'OK' if test_code == 0 else 'FAIL'}")
+
+    return {
+        "validation": {
+            "typecheck": {"ok": tc_code == 0, "output": tc_out},
+            "test": {"ok": test_code == 0, "output": test_out},
+        }
+    }
+
+
 # ---------------------------------------------------------------------------
 # Graph assembly
 # ---------------------------------------------------------------------------
@@ -149,10 +175,12 @@ def build_graph():
     graph.add_node("inspect", inspect_node)
     graph.add_node("plan", plan_node)
     graph.add_node("generate", generate_node)
+    graph.add_node("validate", validate_node)
 
     graph.add_edge(START, "inspect")
     graph.add_edge("inspect", "plan")
     graph.add_edge("plan", "generate")
-    graph.add_edge("generate", END)
+    graph.add_edge("generate", "validate")
+    graph.add_edge("validate", END)
 
     return graph.compile()
