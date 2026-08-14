@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         "review": {},
         "retry_count": 0,
         "max_retries": args.max_retries,
+        "escalated": False,
     }
 
     try:

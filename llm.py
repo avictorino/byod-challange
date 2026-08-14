@@ -200,8 +200,11 @@ class LLMClientFactory:
     Routing rule: a model name containing ":" follows Ollama's tag
     convention (e.g. "gemma4:12b") and is routed to `OllamaClient`; any
     other name (e.g. "gpt-5.6-luna") is treated as an OpenAI model id and
-    routed to `OpenAIClient`. No fallback — a missing/unavailable model
-    raises `LLMConfigError` instead of silently trying the other provider.
+    routed to `OpenAIClient`. No fallback for `create()` — a missing/
+    unavailable model raises `LLMConfigError` instead of silently trying
+    the other provider. `create_escalation()` is the one deliberate
+    exception: an explicit, opt-in, capped-at-once-per-run escalation to
+    OpenAI, used by graph.py only after every local retry is spent.
     """
 
     @staticmethod
@@ -215,3 +218,15 @@ class LLMClientFactory:
 
         logger.info(f"{role} -> {client.provider}:{client.model}", extra={"stage": "factory"})
         return client
+
+    @staticmethod
+    def create_escalation() -> LLMClient | None:
+        """Build the last-resort OpenAI client for a repair escalation.
+
+        Returns None if OPENAI_API_KEY isn't set — escalation is opt-in by
+        the presence of that key alone, no separate flag to configure.
+        """
+        if not os.environ.get("OPENAI_API_KEY"):
+            return None
+        model = os.environ.get("ESCALATION_MODEL", "gpt-4o-mini")
+        return OpenAIClient(model)

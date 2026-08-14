@@ -4,8 +4,11 @@ Full pipeline (built up incrementally across commits):
 
     Inspect -> Plan -> Generate -> Validate -> Review -> Finalize
                                        ^                    |
-                                       |     Repair <--------  (fail, retries left)
-                                       +------(loop)
+                                       |     Repair <--------  (fail, local retries left)
+                                       |                     |
+                                       +---- Escalate <------+  (fail, retries exhausted,
+                                                                  OPENAI_API_KEY set,
+                                                                  not yet escalated)
 
 This module owns the `AgentState` schema and every node function. Nodes are
 coarse-grained — one per pipeline phase. Fine-grained work inside a phase
@@ -13,10 +16,18 @@ coarse-grained — one per pipeline phase. Fine-grained work inside a phase
 node rather than N separate graph nodes: simpler to read, while LangGraph
 still owns the phase-level flow and the Review -> Repair -> Validate retry
 loop, which is the part that actually needs branching state.
+
+Escalate is the same idea as Repair (re-generate the files still broken)
+but forced onto OpenAI instead of the locally-configured model, and capped
+at one attempt per run via the `escalated` flag in state. It only ever
+runs after every local retry has been spent — cheap/free local attempts
+first, real money only as a last resort, and only if OPENAI_API_KEY is
+present at all.
 """
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TypedDict
 
@@ -24,7 +35,7 @@ from langgraph.graph import END, START, StateGraph
 
 import prompts
 import tools
-from llm import LLMClientFactory
+from llm import LLMClient, LLMClientFactory
 from llm import usage as llm_usage
 
 logger = logging.getLogger("agent")
@@ -40,6 +51,7 @@ class AgentState(TypedDict):
     review: dict
     retry_count: int
     max_retries: int
+    escalated: bool
 
 
 def _log(stage: str, message: str) -> None:
@@ -219,25 +231,53 @@ def _problem_files(state: AgentState) -> dict[str, str]:
     return {path: "\n\n".join(msgs) for path, msgs in problems.items()}
 
 
-def repair_node(state: AgentState) -> dict:
-    """Re-generate only the files implicated by validation/review failures."""
-    llm = LLMClientFactory.create("generator")
+def _repair_files(llm: LLMClient, state: AgentState, stage: str, label: str) -> dict[str, str]:
+    """Shared repair logic: re-generate every file implicated by the last
+    validation/review failure, using whichever LLM client the caller built.
+    Used by both `repair` (local model) and `escalate` (OpenAI)."""
     root = Path(state["output_dir"])
     generated = dict(state["generated_files"])
     problems = _problem_files(state) or {
         p: "Validation failed but no specific file could be blamed." for p in generated
     }
 
-    attempt = state["retry_count"] + 1
     for path, problem_text in problems.items():
         system, user = prompts.repair_prompt(path, generated[path], problem_text, state["boilerplate_context"])
-        raw = llm.complete(system, user, role="generator")
+        raw = llm.complete(system, user, role=stage)
         content = tools.extract_code_block(raw)
         tools.write_file(root, path, content)
         generated[path] = content
-        _log("repair", f"retry {attempt}/{state['max_retries']} -> {path}")
+        _log(stage, f"{label} -> {path}")
 
+    return generated
+
+
+def repair_node(state: AgentState) -> dict:
+    """Re-generate only the files implicated by validation/review failures,
+    using the locally-configured model (cheap/free retries first)."""
+    llm = LLMClientFactory.create("generator")
+    attempt = state["retry_count"] + 1
+    generated = _repair_files(llm, state, "repair", f"retry {attempt}/{state['max_retries']}")
     return {"generated_files": generated, "retry_count": attempt}
+
+
+def escalate_node(state: AgentState) -> dict:
+    """Last-resort repair pass on OpenAI, spent at most once per run.
+
+    Only reached once every local retry is exhausted AND OPENAI_API_KEY is
+    set — see `route_after_review`. Escalation is opt-in purely by the
+    presence of that key; there's no separate flag to flip.
+    """
+    llm = LLMClientFactory.create_escalation()
+    if llm is None:
+        # Key disappeared between the routing check and here — nothing to
+        # escalate to; let route send this straight to finalize next.
+        _log("escalate", "OPENAI_API_KEY not set, nothing to escalate to")
+        return {"escalated": True}
+
+    _log("escalate", f"local retries exhausted — escalating to {llm.provider}:{llm.model}")
+    generated = _repair_files(llm, state, "escalate", f"{llm.provider}:{llm.model}")
+    return {"generated_files": generated, "escalated": True}
 
 
 def finalize_node(state: AgentState) -> dict:
@@ -254,6 +294,7 @@ def finalize_node(state: AgentState) -> dict:
         f"{len(state.get('generated_files', {}))} file(s), "
         f"typecheck={'OK' if tc_ok else 'FAIL'}, test={'OK' if test_ok else 'FAIL'}, "
         f"review={'PASS' if review_ok else 'FAIL'}, retries={state.get('retry_count', 0)}, "
+        f"escalated={state.get('escalated', False)}, "
         f"~{llm_usage.approx_tokens} tokens (~${llm_usage.approx_cost_usd})",
     )
     if not ok:
@@ -263,15 +304,19 @@ def finalize_node(state: AgentState) -> dict:
 
 
 def route_after_review(state: AgentState) -> str:
-    """Conditional edge out of `review`: retry through `repair`, or stop at `finalize`."""
+    """Conditional edge out of `review`: retry locally through `repair`,
+    escalate to OpenAI once as a last resort, or stop at `finalize`."""
     validation_ok = all(check.get("ok") for check in state["validation"].values())
     review_ok = state["review"].get("passed", False)
     if validation_ok and review_ok:
         return "finalize"
-    if state["retry_count"] >= state["max_retries"]:
-        _log("route", f"retries exhausted ({state['retry_count']}/{state['max_retries']}) — finalizing as-is")
-        return "finalize"
-    return "repair"
+    if state["retry_count"] < state["max_retries"]:
+        return "repair"
+    if not state["escalated"] and os.environ.get("OPENAI_API_KEY"):
+        _log("route", "local retries exhausted — OPENAI_API_KEY is set, trying one escalation")
+        return "escalate"
+    _log("route", f"retries exhausted ({state['retry_count']}/{state['max_retries']}) — finalizing as-is")
+    return "finalize"
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +332,7 @@ def build_graph():
     graph.add_node("validate", validate_node)
     graph.add_node("review", review_node)
     graph.add_node("repair", repair_node)
+    graph.add_node("escalate", escalate_node)
     graph.add_node("finalize", finalize_node)
 
     graph.add_edge(START, "inspect")
@@ -294,8 +340,11 @@ def build_graph():
     graph.add_edge("plan", "generate")
     graph.add_edge("generate", "validate")
     graph.add_edge("validate", "review")
-    graph.add_conditional_edges("review", route_after_review, {"repair": "repair", "finalize": "finalize"})
+    graph.add_conditional_edges(
+        "review", route_after_review, {"repair": "repair", "escalate": "escalate", "finalize": "finalize"}
+    )
     graph.add_edge("repair", "validate")
+    graph.add_edge("escalate", "validate")
     graph.add_edge("finalize", END)
 
     return graph.compile()

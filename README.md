@@ -14,7 +14,11 @@ copy .env.example .env
 ```
 
 Edit `.env` with the Ollama/OpenAI models to use (`CODE_GENERATOR_MODEL`,
-`CODE_REVIEW_MODEL`).
+`CODE_REVIEW_MODEL`). `OPENAI_API_KEY` is optional: if set, the repair loop
+gets one last-resort attempt on OpenAI (`ESCALATION_MODEL`) after local
+retries are exhausted and still failing — free/local is always tried first,
+OpenAI only spends real tokens as a final fallback, at most once per run.
+Leave it unset to run 100% local.
 
 ## 2. Run the agent
 
