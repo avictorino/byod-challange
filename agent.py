@@ -127,16 +127,15 @@ def main(argv: list[str] | None = None) -> int:
         log(logger, "error", f"pipeline failed: {exc}")
         return 1
 
+    # finalize_node already logged the full summary (files, validation, review,
+    # retries, approx cost) — just decide the process exit code from it.
     validation = final_state.get("validation", {})
-    tc_ok = validation.get("typecheck", {}).get("ok")
-    test_ok = validation.get("test", {}).get("ok")
-    log(
-        logger,
-        "done",
-        f"generated {len(final_state.get('generated_files', {}))} file(s) — "
-        f"typecheck={'OK' if tc_ok else 'FAIL'} test={'OK' if test_ok else 'FAIL'}",
+    ok = (
+        all(check.get("ok") for check in validation.values())
+        and final_state.get("review", {}).get("passed", False)
     )
-    return 0
+    log(logger, "done", f"run `cd {output_path} && npm run dev` to try the app")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

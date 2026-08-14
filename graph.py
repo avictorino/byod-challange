@@ -25,6 +25,7 @@ from langgraph.graph import END, START, StateGraph
 import prompts
 import tools
 from llm import LLMClientFactory
+from llm import usage as llm_usage
 
 logger = logging.getLogger("agent")
 
@@ -165,6 +166,114 @@ def validate_node(state: AgentState) -> dict:
     }
 
 
+def review_node(state: AgentState) -> dict:
+    """Second LLM opinion: does the code actually satisfy the spec?
+
+    The semantic half of self-validation, complementing the mechanical
+    typecheck/test run — a file can pass both and still miss a requirement
+    (e.g. the wrong breakpoint for the responsive image).
+    """
+    llm = LLMClientFactory.create("reviewer")
+    system, user = prompts.review_prompt(state["spec"], state["generated_files"], state["validation"])
+    _log("review", "checking generated files against the spec + validation output...")
+    raw = llm.complete(system, user, role="reviewer")
+
+    try:
+        result = tools.extract_json(raw)
+        passed, issues = bool(result["passed"]), result.get("issues", [])
+    except (ValueError, KeyError) as exc:
+        # An unparsable review is treated as a failed review, not a crash —
+        # safer to loop through repair than to silently assume success.
+        _log("review", f"invalid review output ({exc}) — treating as FAIL")
+        passed, issues = False, [{"file": "", "problem": f"reviewer output was invalid: {exc}", "suggestion": ""}]
+
+    _log("review", f"{'PASS' if passed else 'FAIL'} ({len(issues)} issue(s))")
+    return {"review": {"passed": passed, "issues": issues}}
+
+
+def _problem_files(state: AgentState) -> dict[str, str]:
+    """Map path -> combined problem description, from validation output + review issues.
+
+    tsc/vitest output is parsed for the file paths it actually mentions so
+    only the implicated files are resent to the model; if nothing can be
+    attributed, every generated file is treated as a candidate (safety net).
+    """
+    generated = state["generated_files"]
+    problems: dict[str, list[str]] = {}
+
+    for check_name, check in state["validation"].items():
+        if check.get("ok"):
+            continue
+        output = check.get("output", "")
+        targets = tools.files_with_errors(output) & set(generated) or set(generated)
+        for path in targets:
+            problems.setdefault(path, []).append(f"{check_name} output:\n{output[-2000:]}")
+
+    for issue in state["review"].get("issues", []):
+        path = issue.get("file")
+        if path in generated:
+            problems.setdefault(path, []).append(
+                f"Reviewer: {issue.get('problem', '')} Suggestion: {issue.get('suggestion', '')}"
+            )
+
+    return {path: "\n\n".join(msgs) for path, msgs in problems.items()}
+
+
+def repair_node(state: AgentState) -> dict:
+    """Re-generate only the files implicated by validation/review failures."""
+    llm = LLMClientFactory.create("generator")
+    root = Path(state["output_dir"])
+    generated = dict(state["generated_files"])
+    problems = _problem_files(state) or {
+        p: "Validation failed but no specific file could be blamed." for p in generated
+    }
+
+    attempt = state["retry_count"] + 1
+    for path, problem_text in problems.items():
+        system, user = prompts.repair_prompt(path, generated[path], problem_text, state["boilerplate_context"])
+        raw = llm.complete(system, user, role="generator")
+        content = tools.extract_code_block(raw)
+        tools.write_file(root, path, content)
+        generated[path] = content
+        _log("repair", f"retry {attempt}/{state['max_retries']} -> {path}")
+
+    return {"generated_files": generated, "retry_count": attempt}
+
+
+def finalize_node(state: AgentState) -> dict:
+    """Print the run's final outcome: what was built, whether it validated, at what cost."""
+    validation = state.get("validation", {})
+    tc_ok = validation.get("typecheck", {}).get("ok")
+    test_ok = validation.get("test", {}).get("ok")
+    review_ok = state.get("review", {}).get("passed")
+    ok = bool(tc_ok and test_ok and review_ok)
+
+    _log(
+        "finalize",
+        f"{'SUCCESS' if ok else 'FINISHED WITH OPEN ISSUES'} — "
+        f"{len(state.get('generated_files', {}))} file(s), "
+        f"typecheck={'OK' if tc_ok else 'FAIL'}, test={'OK' if test_ok else 'FAIL'}, "
+        f"review={'PASS' if review_ok else 'FAIL'}, retries={state.get('retry_count', 0)}, "
+        f"~{llm_usage.approx_tokens} tokens (~${llm_usage.approx_cost_usd})",
+    )
+    if not ok:
+        for issue in state.get("review", {}).get("issues", []):
+            _log("finalize", f"unresolved: {issue.get('file', '?')}: {issue.get('problem', '')}")
+    return {}
+
+
+def route_after_review(state: AgentState) -> str:
+    """Conditional edge out of `review`: retry through `repair`, or stop at `finalize`."""
+    validation_ok = all(check.get("ok") for check in state["validation"].values())
+    review_ok = state["review"].get("passed", False)
+    if validation_ok and review_ok:
+        return "finalize"
+    if state["retry_count"] >= state["max_retries"]:
+        _log("route", f"retries exhausted ({state['retry_count']}/{state['max_retries']}) — finalizing as-is")
+        return "finalize"
+    return "repair"
+
+
 # ---------------------------------------------------------------------------
 # Graph assembly
 # ---------------------------------------------------------------------------
@@ -176,11 +285,17 @@ def build_graph():
     graph.add_node("plan", plan_node)
     graph.add_node("generate", generate_node)
     graph.add_node("validate", validate_node)
+    graph.add_node("review", review_node)
+    graph.add_node("repair", repair_node)
+    graph.add_node("finalize", finalize_node)
 
     graph.add_edge(START, "inspect")
     graph.add_edge("inspect", "plan")
     graph.add_edge("plan", "generate")
     graph.add_edge("generate", "validate")
-    graph.add_edge("validate", END)
+    graph.add_edge("validate", "review")
+    graph.add_conditional_edges("review", route_after_review, {"repair": "repair", "finalize": "finalize"})
+    graph.add_edge("repair", "validate")
+    graph.add_edge("finalize", END)
 
     return graph.compile()

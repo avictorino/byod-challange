@@ -15,6 +15,15 @@ Project conventions (do not violate these):
 - TypeScript is strict, with noUnusedLocals, noUnusedParameters and
   noUncheckedIndexedAccess enabled: no unused imports/vars, and guard any
   indexed array/object access that could be undefined.
+- The project uses the new JSX transform (tsconfig `jsx: react-jsx`): do NOT
+  `import React from "react"` unless you actually use the `React` namespace
+  (e.g. `React.FormEvent`). Prefer named imports (`useState`, `useEffect`,
+  and `type FormEvent`, `type ChangeEvent`, ...) instead — an unused default
+  React import fails the strict noUnusedLocals check.
+- Generate exactly one file with exactly one default export (or the named
+  exports its task describes). Never bundle a second component/module into
+  the same reply, and never emit more than one `export default` — if a small
+  helper sub-component is needed, define it unexported in the same file.
 - Import local modules with the `@/` alias (maps to `src/`), e.g. `@/types`,
   `@/graphql/queries`, `@/components/CarCard`.
 - Only use GraphQL queries/mutations and fields already defined in
@@ -84,5 +93,64 @@ def generate_prompt(
         f"Task: generate `{task['path']}`\n"
         f"Description: {task['description']}\n\n"
         "Output the file contents now, inside one ```tsx or ```ts code block."
+    )
+    return system, user
+
+
+def _tail(text: str, n: int = 3000) -> str:
+    return text[-n:] if len(text) > n else text
+
+
+def review_prompt(spec: str, generated_files: dict[str, str], validation: dict) -> tuple[str, str]:
+    system = (
+        "You are a meticulous senior code reviewer for a React + TypeScript + "
+        "Apollo Client + MUI project. Review the generated files against the "
+        "product spec and the mechanical validation output below. Respond "
+        "with ONLY a JSON object — no prose, no markdown fences.\n\n"
+        'JSON schema: {"passed": bool, "issues": [{"file": "src/...", '
+        '"problem": "...", "suggestion": "..."}]}\n\n'
+        "Rules:\n"
+        "- If typecheck or test FAILED, passed MUST be false, and issues MUST "
+        "cover the file(s) responsible for those failures.\n"
+        "- Otherwise passed is true unless you find a real functional defect "
+        "against the spec — not a style nitpick.\n"
+        "- Every issue must name an actual file from the list below."
+    )
+    files_block = "\n\n".join(f"--- {path} ---\n{content}" for path, content in generated_files.items())
+    tc = validation.get("typecheck", {})
+    ts = validation.get("test", {})
+    user = (
+        f"Product spec:\n{spec}\n\n"
+        f"Generated files:\n{files_block}\n\n"
+        f"typecheck: {'PASS' if tc.get('ok') else 'FAIL'}\n{_tail(tc.get('output', ''))}\n\n"
+        f"test: {'PASS' if ts.get('ok') else 'FAIL'}\n{_tail(ts.get('output', ''))}\n\n"
+        "Produce the review JSON now."
+    )
+    return system, user
+
+
+def repair_prompt(
+    path: str,
+    current_content: str,
+    problems: str,
+    boilerplate_context: str,
+) -> tuple[str, str]:
+    system = (
+        "You are a senior React/TypeScript engineer fixing a single file "
+        "based on real validation errors. Make the SMALLEST change that "
+        "fixes the listed problems — preserve the file's existing structure, "
+        "exports and overall approach unless a problem specifically requires "
+        "changing them. Do not rewrite the file from scratch or switch to a "
+        "different pattern. Respond with ONLY a single fenced code block "
+        "containing the file's COMPLETE corrected contents — no explanation "
+        "before or after it."
+    )
+    user = (
+        f"{CONVENTIONS}\n"
+        f"Boilerplate context:\n{boilerplate_context}\n\n"
+        f"File to fix: `{path}`\n\n"
+        f"Current contents:\n```\n{current_content}\n```\n\n"
+        f"Problems to fix:\n{problems}\n\n"
+        "Output the corrected, complete file contents now."
     )
     return system, user

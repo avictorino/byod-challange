@@ -109,6 +109,21 @@ def topo_sort(tasks: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+_TSC_ERROR_RE = re.compile(r"^([^\s()][\w./\\-]*\.tsx?)\(\d+,\d+\)", re.MULTILINE)
+_VITEST_FAIL_RE = re.compile(r"(?:FAIL|✗|×)\s+(src[\w./\\-]*\.tsx?)")
+
+
+def files_with_errors(output: str) -> set[str]:
+    """Best-effort extraction of source file paths mentioned in tsc/vitest output.
+
+    Used by the repair node to target only the files actually implicated by
+    a failure instead of resending every generated file on every retry.
+    """
+    found = {m.replace("\\", "/") for m in _TSC_ERROR_RE.findall(output)}
+    found |= {m.replace("\\", "/") for m in _VITEST_FAIL_RE.findall(output)}
+    return found
+
+
 def run_cmd(cmd: list[str], cwd: Path, timeout: int = 600) -> tuple[int, str]:
     """Run a command, returning (exit_code, combined stdout+stderr).
 
@@ -122,6 +137,8 @@ def run_cmd(cmd: list[str], cwd: Path, timeout: int = 600) -> tuple[int, str]:
             shell=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
