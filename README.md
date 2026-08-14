@@ -192,115 +192,63 @@ npm run test
 
 ## Anticipated questions
 
-**Why LangGraph instead of a hand-rolled loop or another framework?**
-I wanted the state machine explicit and inspectable: one typed
-`AgentState` dict flows through named nodes instead of ad-hoc globals,
-and the one part of this pipeline that actually needs branching — retry
-until clean or out of budget — is a single `add_conditional_edges` call
-instead of a hand-written `while` loop with flags. The mermaid diagram
-in this README isn't documentation drifting from the code, it's the
-same shape as `build_graph()` in `graph.py`.
+**Why LangGraph?** Explicit, inspectable state: one typed `AgentState`
+flows through named nodes, and the only branching logic (retry until
+clean or out of budget) is a single `add_conditional_edges` call. The
+diagram above is literally `build_graph()`'s shape.
 
-**How was the spec decomposed into a plan?**
-`plan_node` sends the spec plus the boilerplate context (file tree,
-`types.ts`, `queries.ts`) to the generator model with a JSON schema in
-the prompt: an ordered list of `{path, description, depends_on}`. The
-reply is parsed, validated, and topologically sorted
-(`tools.topo_sort`, Kahn's algorithm) so files come out in dependency
-order — hooks before the components that use them, components before
-`App.tsx`, everything before its test. Nothing in this step is
-hardcoded to the Car Inventory spec; a different `spec.txt` produces a
-different plan through the same code path.
+**How was the spec decomposed into a plan?** `plan_node` asks the
+generator model for a JSON list of `{path, description, depends_on}`,
+topologically sorted (`tools.topo_sort`) into dependency order. Fully
+spec-driven — a different `spec.txt` produces a different plan through
+the same code.
 
-**What hardware did you actually run this on?**
-A laptop with an **RTX 3080 (16GB VRAM) and 32GB system RAM**, running
-Ollama locally for every real test run in this project's history. That
-ceiling is also why the model-selection story below matters — 16GB
-isn't much headroom for juggling multiple large local models at once.
+**What hardware did you run this on?** RTX 3080 (16GB VRAM) + 32GB RAM,
+running Ollama for every real test in this project — that ceiling drives
+the model-selection tradeoffs below.
 
-**Why Ollama as the primary model instead of going straight to a hosted API?**
-Free and private during iteration — every real run in this repo used it
-at $0 — and the brief explicitly allows "Anthropic, OpenAI, or any
-provider, use what you're strongest with."
+**Why Ollama as the primary model?** Free and private during iteration,
+and the brief allows any provider.
 
-**Why one model (`qwen2.5-coder:14b`) for both generator and reviewer, not two different ones?**
-That wasn't the original plan — I started with two different local
-models, one per role. On that 16GB-VRAM machine, alternating between two
-different multi-GB models on every call forced Ollama to unload/reload
-weights each time, and repair rounds started hitting 100–200s+ timeouts
-under sustained load. Pointing both roles at one resident model removed
-that failure class entirely (calls dropped from 60–100s+ to 5–50s). The
-tradeoff is real: review is no longer "a second opinion from a different
-model family," just the same model re-reading its own output with a
-different prompt/role — documented, not hidden.
+**Why one model for both generator and reviewer?** Started with two
+different local models; alternating between them forced Ollama to
+reload weights every call, causing 100–200s+ timeouts. One resident
+model fixed that (calls dropped to 5–50s) — the tradeoff is Review is
+no longer a different model's opinion, just the same model with a
+different prompt.
 
-**Why no automatic fallback between Ollama and OpenAI for the primary roles?**
-Predictability during debugging. If `CODE_GENERATOR_MODEL`/
-`CODE_REVIEW_MODEL` can't be used, `LLMClientFactory` raises immediately
-with a clear message (missing key, model not pulled, Ollama unreachable)
-instead of silently retrying on a different provider with different
-cost/behavior. `Escalate` is the one deliberate exception, and it's
-opt-in, capped at once per run, and only ever a last resort — not a
-fallback in the same sense.
+**Why no automatic fallback between Ollama and OpenAI?** Predictability:
+`LLMClientFactory` fails fast with a clear message instead of silently
+switching providers. `Escalate` is the one deliberate, opt-in,
+once-per-run exception.
 
-**Is the self-validation real, or does the agent just ask an LLM "did I do a good job"?**
-Both, on purpose, as two independent layers. Mechanical: `npm run
-typecheck` and `npm run test` run as real subprocesses against the real
-generated app — no invented test framework. Semantic: a second LLM call
-(`review_node`) reads the spec, the generated files, and that mechanical
-output, and returns a structured PASS/FAIL with per-file issues — this
-is what catches something that compiles and passes its tests but still
-doesn't match the spec (e.g. a sort control wired to the wrong fields).
+**Is the self-validation real?** Two layers: mechanical (real `npm run
+typecheck`/`test`) and semantic (a second LLM reviewing files against
+the spec) — the second catches things that compile and pass but still
+miss the spec.
 
-**How does error recovery actually work end to end?**
-Layered, and every layer was exercised by a real failure during
-development: a malformed JSON reply from Plan/Review gets one corrective
-retry with the exact parse error fed back in; a transient network error
-mid-call gets one same-provider retry plus a raised timeout; a failed
-typecheck/test/review sends only the implicated files (parsed from the
-tool output, not the whole app) through `Repair`, looping back to
-`Validate`, up to `--max-retries`; if that's exhausted and
-`OPENAI_API_KEY` is set, one `Escalate` pass tries again on OpenAI; if
-it's still broken after that, `Finalize` says so plainly and the exit
-code reflects it — it never reports success it didn't earn.
+**How does error recovery work end to end?** Layered, each exercised by
+a real bug: malformed JSON gets one corrective retry, network errors get
+one retry, failed validation sends only the implicated files through
+`Repair`, exhausted retries trigger one `Escalate` if `OPENAI_API_KEY`
+is set, and `Finalize` always reports the true outcome.
 
-**How do you keep this from just being spec memorization?**
-Nothing in `agent.py`, `graph.py`, `prompts.py`, or `tools.py` mentions
-"Car," "CarCard," or any other domain concept — the only spec-specific
-content anywhere in this repo is `spec.txt` itself. Swap it for a
-different app spec against the same boilerplate shape, and the same
-code runs unmodified, because the planner derives the file list from
-whatever spec it's handed, not from a template.
+**How do you avoid spec memorization?** No domain concept ("Car", etc.)
+appears anywhere in the agent's own code — only in `spec.txt`. Swap the
+spec and the same code runs unmodified.
 
-**Why skip the brief's "Optional Extras" (GetCar-by-id, year filter, useCarFilters)?**
-A deliberate call to spend the available time on the agentic
-architecture (the four primary evaluation criteria) rather than
-low-value bonus app features. Adding them back is now just new lines in
-`spec.txt` — no agent changes required, since the planner is fully
-spec-driven.
+**Why skip the "Optional Extras"?** Deliberate: spend the time on agent
+architecture instead of low-value bonus features. Adding them back is
+just new `spec.txt` lines.
 
-**What's the approximate cost per run?**
-$0 when everything resolves locally — the common case. If `Escalate`
-fires, it's typically a handful of files re-sent to `gpt-5.6-luna` once,
-priced from that model's real published rate ($0.20/1M input, $1.20/1M
-output) using the exact token counts each API call returns — a few
-cents to roughly $0.20–0.30 in the runs observed while building this.
+**Approximate cost per run?** $0 locally, the common case. If `Escalate`
+fires, roughly a few cents to $0.20–0.30 based on real runs.
 
-**What would you improve with more time?**
-Parallelize generation of files with no dependency relationship
-(currently sequential, on purpose, for simplicity); a cheap static check
-(e.g. "more than one `export default`?") before spending an LLM call on
-something regex-detectable; cache LLM responses across development runs
-to cut cost/time while iterating on the agent itself; revisit a
-two-model Review setup on a machine with more VRAM, now that the
-single-model tradeoff is understood and chosen rather than forced.
+**What would you improve with more time?** Parallelize independent file
+generation, a cheap static check before spending an LLM call on
+regex-detectable issues, cache LLM responses across dev runs, revisit
+two-model Review with more VRAM.
 
-**What was this agent's own code written with?**
-Claude (Claude Code) — used throughout, iteratively, testing against
-real local Ollama runs and fixing what broke rather than writing it in
-one pass. The git history is that process: each commit is a working
-increment, and several of the `fix:` commits exist specifically because
-a real run surfaced a real bug (a Windows console encoding crash, a
-timeout under model-switching load, a test asserting on the wrong DOM
-structure) that got diagnosed from the actual failing output and fixed
-at the root, not guessed at.
+**What was this agent's code written with?** Claude (Claude Code),
+iteratively against real runs — several `fix:` commits exist because a
+real run surfaced a real bug that got diagnosed and fixed at the root.
