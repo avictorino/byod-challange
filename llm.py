@@ -228,5 +228,5 @@ class LLMClientFactory:
         """
         if not os.environ.get("OPENAI_API_KEY"):
             return None
-        model = os.environ.get("ESCALATION_MODEL", "gpt-4o-mini")
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         return OpenAIClient(model)
