@@ -9,6 +9,11 @@ __pycache__/
 # Generated app output — reproducible by running the agent, not versioned
 generated-app/
 
-# Reference boilerplate + assessment doc are not part of this repo's work
-/Fullstack-Coding-Challenge-main/
+# Boilerplate is committed (the agent needs it to scaffold --output; a
+# fresh clone must be runnable without a separate download) — only ignore
+# what npm would generate inside it if someone installs there directly.
+/Fullstack-Coding-Challenge-main/node_modules/
+/Fullstack-Coding-Challenge-main/dist/
+
+# Assessment PDF is reference material, not part of the deliverable
 /*.pdf
