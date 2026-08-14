@@ -33,6 +33,19 @@ Project conventions (do not violate these):
   `await screen.findByRole(...)`). Do this in EVERY test case that renders
   the component, not just the first one in the file — a `getBy*` called
   before the mock resolves fails even though the query itself is correct.
+- To assert the ORDER of a rendered list (e.g. after sorting), query for
+  ALL matching elements in a single call — `screen.getAllByRole(...)`,
+  `screen.getAllByText(...)`, or `container.querySelectorAll(...)` — which
+  returns them in DOM order, then compare an array built from that result
+  (e.g. `.map(el => el.textContent)`) against the expected order with
+  `toEqual`. Do not try to infer order by comparing individually-queried
+  elements' positions/attributes; that is unreliable and hard to get right.
+- When writing a "shows loading state" test, first check exactly what the
+  component conditionally renders while loading (often only the data-
+  dependent portion is gated — search/sort controls or a form may render
+  unconditionally). Only assert that the loading-gated part is replaced by
+  a loading indicator; do not assume the whole component is hidden unless
+  that is genuinely how it's implemented.
 - Generate exactly one file with exactly one default export (or the named
   exports its task describes). Never bundle a second component/module into
   the same reply, and never emit more than one `export default` — if a small
