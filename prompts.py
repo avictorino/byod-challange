@@ -25,6 +25,14 @@ Project conventions (do not violate these):
   type handlers with it. Do NOT use the old MUI v4 pattern
   `(event: React.ChangeEvent<{ value: unknown }>) => void`; it does not
   typecheck against this version.
+- Every `it()`/`test()` block that renders a component wrapped in
+  `MockedProvider` starts in a loading state — the mocked query hasn't
+  resolved yet. Before using a synchronous `getBy*` query for anything that
+  only appears once data has loaded, first `await screen.findBy*` for at
+  least one such element (e.g. `await screen.findByText(...)` or
+  `await screen.findByRole(...)`). Do this in EVERY test case that renders
+  the component, not just the first one in the file — a `getBy*` called
+  before the mock resolves fails even though the query itself is correct.
 - Generate exactly one file with exactly one default export (or the named
   exports its task describes). Never bundle a second component/module into
   the same reply, and never emit more than one `export default` — if a small
