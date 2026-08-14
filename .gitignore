@@ -6,10 +6,8 @@ __pycache__/
 # Secrets
 .env
 
-# Generated app output (node deps/build artifacts only — source is committed as the sample)
-generated-app/node_modules/
-generated-app/dist/
-generated-app/.vite/
+# Generated app output — reproducible by running the agent, not versioned
+generated-app/
 
 # Reference boilerplate + assessment doc are not part of this repo's work
 /Fullstack-Coding-Challenge-main/

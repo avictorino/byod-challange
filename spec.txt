@@ -1,0 +1,32 @@
+Car Inventory Manager
+
+Build a Car Inventory Manager feature inside the existing React + TypeScript
++ Vite + Apollo Client + MUI boilerplate. The GraphQL API is already mocked
+with MSW and exposes a GetCars query, a GetCar(id) query, and an AddCar
+mutation, all working against the Car type already defined in the project.
+
+Requirements:
+
+1. Fetch and display the list of cars using the GetCars query through
+   Apollo Client.
+2. Each car has three image URLs (mobile, tablet, desktop). Show the image
+   that matches the current viewport width: mobile image at 640px and
+   below, tablet image between 641px and 1023px, and desktop image at
+   1024px and above. Update the image if the window is resized.
+3. Present each car as a Material UI Card showing make, model, year, color
+   and the responsive image.
+4. Add a form to add a new car (make, model, year, color) that submits
+   through the AddCar mutation and shows the new car in the list once it
+   is added.
+5. Add a search input that filters the visible cars by model
+   (case-insensitive, partial match), and controls to sort the list by
+   year or by make.
+6. Extract all GraphQL data-fetching logic for the car list into a
+   reusable useCars() hook (loading, error and data state), instead of
+   calling useQuery directly inside components.
+7. Add unit tests for at least the car list/card component and the
+   search/sort behavior, following the existing testing patterns in the
+   project (MockedProvider, Testing Library).
+
+Keep the UI functional and reasonably tidy; visual polish is not the
+priority.
